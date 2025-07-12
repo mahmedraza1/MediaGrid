@@ -1,0 +1,5 @@
+/* Custom styles for the MediaGrid application */
+.app {
+  min-height: 100vh;
+  background-color: #f9fafb;
+}

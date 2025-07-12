@@ -1,0 +1,293 @@
+# MediaGrid - Professional Video File Manager
+
+A modern, local-first web application for managing video files and media content, built with Node.js (Express) and React (Vite). Features a beautiful, responsive interface with advanced file management capabilities.
+
+## ✨ Features
+
+### 🗂️ **Advanced File Management**
+- Browse, upload, delete, rename files and folders
+- Drag & drop file uploads with visual feedback
+- Multiple file selection and bulk operations
+- Chunked uploads for large files (>50MB)
+- Real-time file listing and navigation
+- Copy absolute links for files and folders
+- Breadcrumb navigation with modern UI
+
+### 🎬 **Video Features**
+- Preview video files in modal player
+- Support for MP4, MKV, MOV, AVI, WMV, FLV, WebM, M4V
+- Direct file serving for media playback
+- Video thumbnail generation (coming soon)
+
+### 📊 **System Information**
+- Beautiful horizontal disk space usage statistics
+- File size and date information
+- Real-time upload progress
+- Responsive storage indicators
+
+### 🎨 **Modern User Experience**
+- Clean, professional interface with Tailwind CSS
+- Gradient backgrounds and smooth animations
+- Toast notifications for all actions
+- Loading states and comprehensive error handling
+- Mobile-responsive design
+- Dark mode support (coming soon)
+
+### 🔧 **Technical Features**
+- RESTful API with Express.js
+- Memory-efficient file uploads
+- Direct file storage without temporary files
+- Path-based file organization
+- CORS configuration for cross-origin requests
+
+## 🚀 Quick Start
+
+### Prerequisites
+- **Node.js** (v16 or higher)
+- **npm** or **yarn**
+
+### Installation
+
+1. **Clone the repository:**
+   ```bash
+   git clone <repository-url>
+   cd MediaGrid
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   # Install server dependencies
+   cd Server
+   npm install
+   
+   # Install client dependencies
+   cd ../Client
+   npm install
+   ```
+
+3. **Start development environment:**
+   ```bash
+   # From the root directory (if you have the start script)
+   ./start-dev.sh
+   ```
+
+   Or start services manually:
+   ```bash
+   # Terminal 1 - Start server (from Server directory)
+   cd Server
+   npm start
+   
+   # Terminal 2 - Start client (from Client directory)
+   cd Client
+   npm run dev
+   ```
+
+4. **Access the application:**
+   - Frontend: http://localhost:5173 (Vite dev server)
+   - Backend API: http://localhost:5000
+   - File serving: http://localhost:5000/videos/
+
+## 📁 Project Structure
+
+```
+MediaGrid/
+├── Client/                     # React frontend (Vite)
+│   ├── public/
+│   │   └── vite.svg
+│   ├── src/
+│   │   ├── components/         # React components
+│   │   │   ├── FileManager.jsx      # Main file browser
+│   │   │   ├── VideoPreviewModal.jsx # Video player modal
+│   │   │   └── DiskUsageStats.jsx   # Storage statistics
+│   │   ├── assets/             # Static assets
+│   │   ├── App.jsx             # Main app component
+│   │   ├── App.css             # Global styles
+│   │   ├── index.css           # Tailwind imports
+│   │   └── main.jsx            # App entry point
+│   ├── package.json
+│   ├── vite.config.js          # Vite configuration
+│   ├── tailwind.config.js      # Tailwind CSS config
+│   └── eslint.config.js        # ESLint configuration
+├── Server/                     # Node.js backend (Express)
+│   ├── uploads/                # File storage (git-ignored)
+│   ├── index.js                # Server entry point
+│   └── package.json
+├── .gitignore                  # Git ignore rules
+├── start-dev.sh               # Development startup script
+└── README.md
+```
+
+## 🛠️ API Endpoints
+
+| Method | Endpoint | Description | Parameters |
+|--------|----------|-------------|------------|
+| `GET` | `/api/files` | List files and folders | `?path=/folder/path` |
+| `POST` | `/api/upload` | Upload single file | `FormData: file, path` |
+| `POST` | `/api/upload-chunk` | Upload file chunks | `Query: filename, chunkIndex, totalChunks, targetPath` |
+| `POST` | `/api/folder` | Create new folder | `Body: name, path` |
+| `DELETE` | `/api/file` | Delete file | `Body: path` |
+| `DELETE` | `/api/folder` | Delete folder | `Body: path` |
+| `POST` | `/api/rename` | Rename file/folder | `Body: oldPath, newName` |
+| `GET` | `/api/health` | Health check | None |
+| `GET` | `/videos/*` | Serve static files | File path |
+
+## 🎯 Usage Guide
+
+### 📤 Uploading Files
+- **Drag & Drop**: Simply drag files into the blue drop zone
+- **File Picker**: Click "Upload Files" button to browse and select
+- **Folder Upload**: Click "Upload Folder" to upload entire directories
+- **Large Files**: Files over 50MB use chunked upload automatically
+- **Multiple Files**: Select multiple files for batch upload
+
+### 📁 File & Folder Management
+- **Navigation**: Click folder names or use breadcrumb navigation
+- **Create Folders**: Use "New Folder" button
+- **Selection Mode**: Toggle selection mode for bulk operations
+- **Bulk Delete**: Select multiple items and delete them together
+- **Rename**: Click rename button or double-click items (coming soon)
+- **Copy Links**: Get direct download links for files or app links for folders
+
+### 🎬 Video Features
+- **Preview**: Click video file names or "Preview" button
+- **Download**: Right-click and save video files
+- **Supported Formats**: MP4, MKV, MOV, AVI, WMV, FLV, WebM, M4V
+
+### 🧭 Navigation
+- **Breadcrumbs**: Click any part of the path to navigate
+- **Up Button**: Go to parent directory
+- **Home**: Click "Home" in breadcrumbs to return to root
+
+## ⚙️ Configuration
+
+### Server Configuration (Server/index.js)
+```javascript
+const PORT = process.env.PORT || 5000;
+const UPLOADS_DIR = path.join(__dirname, 'uploads');
+
+// File size limits
+limits: {
+  fileSize: 5 * 1024 * 1024 * 1024, // 5GB limit
+  fieldSize: 25 * 1024 * 1024        // 25MB field size
+}
+```
+
+### Client Configuration (Client/src/App.jsx)
+```javascript
+const API_BASE_URL = 'http://localhost:5000/api';
+const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB chunks
+```
+
+### Environment Variables
+Create `.env` files for custom configuration:
+
+**Server/.env:**
+```env
+PORT=5000
+UPLOADS_DIR=./uploads
+MAX_FILE_SIZE=5368709120
+```
+
+**Client/.env:**
+```env
+VITE_API_URL=http://localhost:5000/api
+```
+
+## 🚀 Development
+
+### 🎨 Styling and Theming
+- Built with **Tailwind CSS** for modern, responsive design
+- Custom gradient backgrounds and animations
+- Consistent color scheme and typography
+- Mobile-first responsive design
+
+### 🔧 Adding Features
+- **New File Types**: Modify `isVideoFile()` function
+- **Custom Upload Logic**: Edit upload handlers in server
+- **UI Components**: Add new React components in `Client/src/components/`
+- **API Endpoints**: Extend server routes in `Server/index.js`
+
+### 🐛 Testing
+```bash
+# Run client tests (if configured)
+cd Client
+npm test
+
+# Run server tests (if configured)
+cd Server
+npm test
+```
+
+## 📦 Deployment
+
+### 🌐 Production Build
+```bash
+# Build client for production
+cd Client
+npm run build
+
+# The dist/ folder contains the production build
+```
+
+### 🖥️ Local Network Access
+1. Find your machine's IP address
+2. Update API_BASE_URL in client to use IP instead of localhost
+3. Configure CORS in server for your IP range
+4. Access via `http://YOUR_IP:5173`
+
+### ☁️ VPS/Cloud Deployment
+1. **Build client**: `npm run build` in Client directory
+2. **Configure server** to serve static files from build
+3. **Set up reverse proxy** (nginx recommended)
+4. **Configure SSL** with Let's Encrypt
+5. **Set environment variables** for production
+6. **Configure firewall** and security
+
+### 🐳 Docker (Coming Soon)
+```dockerfile
+# Example Dockerfile structure
+FROM node:16-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+EXPOSE 5000
+CMD ["npm", "start"]
+```
+
+## Troubleshooting
+
+### FFmpeg Issues
+- Ensure FFmpeg is installed and in PATH
+- Check console for FFmpeg error messages
+- Verify video file formats are supported
+
+### Upload Failures
+- Check available disk space
+- Verify file permissions on upload directory
+- Check file size limits (default: no limit set)
+
+### Performance
+- Large video files may take time to compress
+- Consider adjusting FFmpeg preset for speed vs quality
+- Monitor disk space usage
+
+## License
+
+This project is open source. Feel free to modify and distribute.
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Test thoroughly
+5. Submit a pull request
+
+---
+
+**Built with:**
+- Backend: Node.js, Express, FFmpeg, Multer
+- Frontend: React, Vite, Tailwind CSS, React Hot Toast
+- File Management: fs-extra
+- Video Processing: fluent-ffmpeg
