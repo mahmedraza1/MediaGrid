@@ -59,6 +59,9 @@ app.get('/api/check-chunks', async (req, res) => {
       return res.status(400).json({ error: 'Missing required parameters' });
     }
     
+    // Sanitize filename to match what will be saved
+    const sanitizedFilename = sanitizeFilename(filename);
+    
     const uploadsPath = path.join(UPLOADS_DIR, targetPath || '/');
     const tempDir = path.join(uploadsPath, '.chunks');
     
@@ -67,11 +70,11 @@ app.get('/api/check-chunks', async (req, res) => {
     // Check if temp directory exists
     if (await fs.pathExists(tempDir)) {
       const files = await fs.readdir(tempDir);
-      const fileChunks = files.filter(chunk => chunk.startsWith(`${filename}.part`));
+      const fileChunks = files.filter(chunk => chunk.startsWith(`${sanitizedFilename}.part`));
       
       // Extract chunk indices
       fileChunks.forEach(chunkFile => {
-        const match = chunkFile.match(new RegExp(`^${filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.part(\\d+)$`));
+        const match = chunkFile.match(new RegExp(`^${sanitizedFilename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.part(\\d+)$`));
         if (match) {
           existingChunks.push(parseInt(match[1]));
         }
@@ -98,29 +101,32 @@ app.post('/api/upload-chunk', express.raw({ type: 'application/octet-stream', li
       return res.status(400).json({ error: 'Missing required parameters' });
     }
     
+    // Sanitize filename to replace spaces with hyphens
+    const sanitizedFilename = sanitizeFilename(filename);
+    
     const uploadsPath = path.join(UPLOADS_DIR, targetPath || '/');
     fs.ensureDirSync(uploadsPath);
     
     const tempDir = path.join(uploadsPath, '.chunks');
     fs.ensureDirSync(tempDir);
     
-    const chunkPath = path.join(tempDir, `${filename}.part${chunkIndex}`);
+    const chunkPath = path.join(tempDir, `${sanitizedFilename}.part${chunkIndex}`);
     
     // Write chunk to disk
     await fs.writeFile(chunkPath, req.body);
     
     // Check if all chunks are uploaded
     const uploadedChunks = await fs.readdir(tempDir);
-    const fileChunks = uploadedChunks.filter(chunk => chunk.startsWith(`${filename}.part`));
+    const fileChunks = uploadedChunks.filter(chunk => chunk.startsWith(`${sanitizedFilename}.part`));
     
     if (fileChunks.length === parseInt(totalChunks)) {
       // All chunks uploaded, combine them
-      const finalPath = path.join(uploadsPath, filename);
+      const finalPath = path.join(uploadsPath, sanitizedFilename);
       const writeStream = fs.createWriteStream(finalPath);
       
       // Combine chunks in order
       for (let i = 0; i < parseInt(totalChunks); i++) {
-        const chunkPath = path.join(tempDir, `${filename}.part${i}`);
+        const chunkPath = path.join(tempDir, `${sanitizedFilename}.part${i}`);
         const chunkData = await fs.readFile(chunkPath);
         writeStream.write(chunkData);
         await fs.unlink(chunkPath); // Clean up chunk
@@ -137,13 +143,13 @@ app.post('/api/upload-chunk', express.raw({ type: 'application/octet-stream', li
       
       // Get file stats
       const stats = await fs.stat(finalPath);
-      const relativePath = path.join(targetPath || '/', filename);
+      const relativePath = path.join(targetPath || '/', sanitizedFilename);
       
       const file = {
-        name: filename,
+        name: sanitizedFilename,
         path: relativePath.replace(/\\/g, '/'), // Normalize path separators
         size: stats.size,
-        isVideo: isVideoFile(filename),
+        isVideo: isVideoFile(sanitizedFilename),
         created: stats.birthtime,
         modified: stats.mtime
       };
@@ -216,6 +222,57 @@ const getDiskUsage = async () => {
   };
 };
 
+// Get system stats (CPU and RAM) - optimized for low resource usage
+const getSystemStats = async () => {
+  try {
+    // Get CPU usage from /proc/stat (more efficient than top/htop)
+    const cpuOutput = execSync('cat /proc/stat | head -1', { encoding: 'utf8' });
+    const cpuData = cpuOutput.split(/\s+/);
+    const idle = parseInt(cpuData[4]);
+    const total = cpuData.slice(1, 8).reduce((sum, val) => sum + parseInt(val), 0);
+    const cpuUsage = Math.round(((total - idle) / total) * 100);
+
+    // Get memory info from /proc/meminfo (very efficient)
+    const memOutput = execSync('cat /proc/meminfo | head -3', { encoding: 'utf8' });
+    const memLines = memOutput.split('\n');
+    const totalMem = parseInt(memLines[0].match(/(\d+)/)[1]);
+    const freeMem = parseInt(memLines[1].match(/(\d+)/)[1]);
+    const availableMem = parseInt(memLines[2].match(/(\d+)/)[1]);
+    const usedMem = totalMem - availableMem;
+    const memUsage = Math.round((usedMem / totalMem) * 100);
+
+    return {
+      cpu: {
+        usage: cpuUsage,
+        status: cpuUsage > 80 ? 'High' : cpuUsage > 60 ? 'Medium' : 'Low'
+      },
+      memory: {
+        total: `${Math.round(totalMem / 1024 / 1024 * 100) / 100}GB`,
+        used: `${Math.round(usedMem / 1024 / 1024 * 100) / 100}GB`,
+        available: `${Math.round(availableMem / 1024 / 1024 * 100) / 100}GB`,
+        usage: memUsage,
+        status: memUsage > 85 ? 'High' : memUsage > 70 ? 'Medium' : 'Low'
+      }
+    };
+  } catch (error) {
+    console.error('Error getting system stats:', error);
+    return {
+      cpu: { usage: 0, status: 'Unknown' },
+      memory: { total: 'Unknown', used: 'Unknown', available: 'Unknown', usage: 0, status: 'Unknown' }
+    };
+  }
+};
+
+// Utility function to sanitize filename
+const sanitizeFilename = (filename) => {
+  // Replace spaces with hyphens and remove special characters
+  return filename
+    .replace(/\s+/g, '-')           // Replace spaces with hyphens
+    .replace(/[^\w\-_.]/g, '')      // Remove special characters except hyphens, underscores, dots
+    .replace(/--+/g, '-')           // Replace multiple hyphens with single hyphen
+    .replace(/^-+|-+$/g, '');       // Remove leading/trailing hyphens
+};
+
 // API Routes
 
 // Get files and folders in a directory
@@ -257,14 +314,16 @@ app.get('/api/files', async (req, res) => {
       }
     }
 
-    // Get disk usage
+    // Get disk usage and system stats
     const diskUsage = await getDiskUsage();
+    const systemStats = await getSystemStats();
 
     res.json({
       currentPath: requestedPath,
       folders: folders.sort((a, b) => a.name.localeCompare(b.name)),
       files: files.sort((a, b) => a.name.localeCompare(b.name)),
-      diskUsage
+      diskUsage,
+      systemStats
     });
   } catch (error) {
     console.error('Error reading directory:', error);
@@ -279,7 +338,10 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    console.log('File received:', req.file.originalname); // Debug log
+    // Sanitize filename to replace spaces with hyphens
+    const sanitizedFilename = sanitizeFilename(req.file.originalname);
+    
+    console.log('File received:', req.file.originalname, '-> Sanitized:', sanitizedFilename); // Debug log
     console.log('Target path from body:', req.body.path); // Debug log
 
     // Get target path and ensure it exists
@@ -287,20 +349,20 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     const targetDir = path.join(UPLOADS_DIR, targetPath);
     await fs.ensureDir(targetDir);
     
-    // Write file to target directory
-    const finalPath = path.join(targetDir, req.file.originalname);
+    // Write file to target directory with sanitized filename
+    const finalPath = path.join(targetDir, sanitizedFilename);
     await fs.writeFile(finalPath, req.file.buffer);
 
     console.log('File written to:', finalPath); // Debug log
 
     // Build the correct path for the response
-    const relativePath = path.posix.join(targetPath, req.file.originalname);
+    const relativePath = path.posix.join(targetPath, sanitizedFilename);
 
     const uploadedFile = {
-      name: req.file.originalname,
+      name: sanitizedFilename,
       path: relativePath,
       size: req.file.size,
-      isVideo: isVideoFile(req.file.originalname),
+      isVideo: isVideoFile(sanitizedFilename),
       created: new Date(),
       modified: new Date()
     };

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Toaster, toast } from 'react-hot-toast';
 import FileManager from './components/FileManager';
 import VideoPreviewModal from './components/VideoPreviewModal';
-import DiskUsageStats from './components/DiskUsageStats';
+import SystemStats from './components/SystemStats';
 import './App.css';
 
 // API Configuration - automatically adapts to development/production
@@ -14,6 +14,7 @@ function App() {
   const [files, setFiles] = useState([]);
   const [folders, setFolders] = useState([]);
   const [diskUsage, setDiskUsage] = useState(null);
+  const [systemStats, setSystemStats] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState(null);
   const [isVideoModalOpen, setIsVideoModalOpen] = useState(false);
@@ -54,12 +55,33 @@ function App() {
       setFiles(data.files || []);
       setFolders(data.folders || []);
       setDiskUsage(data.diskUsage || null);
+      setSystemStats(data.systemStats || null);
       setCurrentPath(data.currentPath || path);
     } catch (error) {
       console.error('Error loading files:', error);
       toast.error('Failed to load files');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Manual refresh for system stats
+  const refreshStats = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/files?path=${encodeURIComponent(currentPath)}`);
+      if (!response.ok) throw new Error('Failed to refresh stats');
+      
+      const data = await response.json();
+      setDiskUsage(data.diskUsage || null);
+      setSystemStats(data.systemStats || null);
+      
+      toast.success('Stats refreshed!', {
+        duration: 2000,
+        icon: '🔄',
+      });
+    } catch (error) {
+      console.error('Error refreshing stats:', error);
+      toast.error('Failed to refresh stats');
     }
   };
 
@@ -559,6 +581,11 @@ function App() {
   useEffect(() => {
     loadFiles();
     
+    // Set up automatic refresh for system stats every 30 seconds
+    const statsInterval = setInterval(() => {
+      loadFiles(); // This will refresh system stats along with files
+    }, 30000); // 30 seconds
+    
     // Prevent default drag behaviors on the entire page (but allow drop events to propagate)
     const preventDefaults = (e) => {
       e.preventDefault();
@@ -569,6 +596,7 @@ function App() {
     document.addEventListener('drop', preventDefaults, false);
     
     return () => {
+      clearInterval(statsInterval);
       document.removeEventListener('dragover', preventDefaults, false);
       document.removeEventListener('drop', preventDefaults, false);
     };
@@ -698,14 +726,14 @@ function App() {
               
               {/* Horizontal Storage Stats */}
               <div className="hidden lg:block">
-                <DiskUsageStats diskUsage={diskUsage} />
+                <SystemStats diskUsage={diskUsage} systemStats={systemStats} onRefresh={refreshStats} />
               </div>
             </div>
             
             <div className="flex items-center space-x-4">
               {/* Mobile Storage Stats */}
               <div className="lg:hidden">
-                <DiskUsageStats diskUsage={diskUsage} compact={true} />
+                <SystemStats diskUsage={diskUsage} systemStats={systemStats} compact={true} onRefresh={refreshStats} />
               </div>
               
               <div className="flex items-center space-x-2 bg-white px-4 py-2 rounded-xl border border-gray-200 shadow-sm">
