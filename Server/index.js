@@ -225,21 +225,67 @@ const getDiskUsage = async () => {
 // Get system stats (CPU and RAM) - optimized for low resource usage
 const getSystemStats = async () => {
   try {
-    // Get CPU usage from /proc/stat (more efficient than top/htop)
-    const cpuOutput = execSync('cat /proc/stat | head -1', { encoding: 'utf8' });
-    const cpuData = cpuOutput.split(/\s+/);
-    const idle = parseInt(cpuData[4]);
-    const total = cpuData.slice(1, 8).reduce((sum, val) => sum + parseInt(val), 0);
-    const cpuUsage = Math.round(((total - idle) / total) * 100);
+    // Get accurate real-time CPU usage using vmstat (more reliable than /proc/stat snapshots)
+    let cpuUsage = 0;
+    try {
+      // vmstat 1 2 takes two measurements 1 second apart for accurate current usage
+      const vmstatOutput = execSync('vmstat 1 2 | tail -1', { encoding: 'utf8', timeout: 3000 });
+      const vmstatData = vmstatOutput.trim().split(/\s+/);
+      // vmstat column 15 is idle percentage, so CPU usage = 100 - idle
+      const idlePercent = parseInt(vmstatData[14]); // 0-based index, column 15
+      cpuUsage = Math.round(100 - idlePercent);
+    } catch (vmstatError) {
+      // Fallback to top command if vmstat fails
+      try {
+        const topOutput = execSync('top -bn1 | grep "Cpu(s)" | head -1', { encoding: 'utf8', timeout: 2000 });
+        const cpuMatch = topOutput.match(/(\d+\.?\d*)%\s*us/);
+        if (cpuMatch) {
+          cpuUsage = Math.round(parseFloat(cpuMatch[1]));
+        }
+      } catch (topError) {
+        // Last fallback to /proc/loadavg approximation
+        const loadOutput = execSync('cat /proc/loadavg', { encoding: 'utf8' });
+        const load1min = parseFloat(loadOutput.split(' ')[0]);
+        // Rough approximation: load average * 100 / number of cores
+        const coresOutput = execSync('nproc', { encoding: 'utf8' });
+        const cores = parseInt(coresOutput.trim());
+        cpuUsage = Math.min(Math.round((load1min / cores) * 100), 100);
+      }
+    }
 
     // Get memory info from /proc/meminfo (very efficient)
-    const memOutput = execSync('cat /proc/meminfo | head -3', { encoding: 'utf8' });
-    const memLines = memOutput.split('\n');
-    const totalMem = parseInt(memLines[0].match(/(\d+)/)[1]);
-    const freeMem = parseInt(memLines[1].match(/(\d+)/)[1]);
-    const availableMem = parseInt(memLines[2].match(/(\d+)/)[1]);
-    const usedMem = totalMem - availableMem;
-    const memUsage = Math.round((usedMem / totalMem) * 100);
+    let memStats = {
+      total: 0,
+      used: 0,
+      available: 0,
+      usage: 0
+    };
+    
+    try {
+      const memOutput = execSync('cat /proc/meminfo | head -3', { encoding: 'utf8' });
+      const memLines = memOutput.split('\n');
+      const totalMem = parseInt(memLines[0].match(/(\d+)/)[1]);
+      const freeMem = parseInt(memLines[1].match(/(\d+)/)[1]);
+      const availableMem = parseInt(memLines[2].match(/(\d+)/)[1]);
+      const usedMem = totalMem - availableMem;
+      const memUsage = Math.round((usedMem / totalMem) * 100);
+
+      memStats = {
+        total: Math.round(totalMem / 1024 / 1024 * 100) / 100,
+        used: Math.round(usedMem / 1024 / 1024 * 100) / 100,
+        available: Math.round(availableMem / 1024 / 1024 * 100) / 100,
+        usage: memUsage
+      };
+    } catch (memError) {
+      console.warn('Error reading memory stats:', memError.message);
+      // Fallback values
+      memStats = {
+        total: 0,
+        used: 0,
+        available: 0,
+        usage: 0
+      };
+    }
 
     return {
       cpu: {
@@ -247,11 +293,11 @@ const getSystemStats = async () => {
         status: cpuUsage > 80 ? 'High' : cpuUsage > 60 ? 'Medium' : 'Low'
       },
       memory: {
-        total: `${Math.round(totalMem / 1024 / 1024 * 100) / 100}GB`,
-        used: `${Math.round(usedMem / 1024 / 1024 * 100) / 100}GB`,
-        available: `${Math.round(availableMem / 1024 / 1024 * 100) / 100}GB`,
-        usage: memUsage,
-        status: memUsage > 85 ? 'High' : memUsage > 70 ? 'Medium' : 'Low'
+        total: `${memStats.total}GB`,
+        used: `${memStats.used}GB`,
+        available: `${memStats.available}GB`,
+        usage: memStats.usage,
+        status: memStats.usage > 85 ? 'High' : memStats.usage > 70 ? 'Medium' : 'Low'
       }
     };
   } catch (error) {
