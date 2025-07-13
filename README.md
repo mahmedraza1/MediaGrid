@@ -6,7 +6,7 @@ A modern, local-first web application for managing video files and media content
 
 ### 🗂️ **Advanced File Management**
 - Browse, upload, delete, rename files and folders
-- Drag & drop file uploads with visual feedback
+- **Automatic file sanitization** - Spaces in filenames automatically replaced with hyphens
 - Multiple file selection and bulk operations
 - **Robust chunked uploads** for large files (>50MB) with automatic retry
 - **Resume capability** - continue interrupted uploads from where they left off
@@ -22,10 +22,12 @@ A modern, local-first web application for managing video files and media content
 - Video thumbnail generation (coming soon)
 
 ### 📊 **System Information**
-- Beautiful horizontal disk space usage statistics
+- **Real-time system monitoring** - CPU usage, RAM usage, and disk space
+- **Auto-refresh statistics** - Updates every 30 seconds automatically
+- **Manual refresh capability** - Instant refresh button for immediate updates
+- **Responsive display** - Compact view for mobile, full view for desktop
 - File size and date information
-- Real-time upload progress
-- Responsive storage indicators
+- Real-time upload progress tracking
 
 ### 🎨 **Modern User Experience**
 - Clean, professional interface with Tailwind CSS
@@ -38,6 +40,8 @@ A modern, local-first web application for managing video files and media content
 ### 🔧 **Technical Features**
 - RESTful API with Express.js
 - Memory-efficient file uploads
+- **Production-ready build serving** - Single server serves both API and React app
+- **System resource monitoring** - Low-impact CPU and RAM monitoring via /proc filesystem
 - **Enterprise-grade upload reliability** with chunk-level retry logic
 - **Progress persistence** - uploads survive browser refreshes and network failures
 - **Intelligent resume** - automatically detects and skips completed chunks
@@ -122,12 +126,13 @@ A modern, local-first web application for managing video files and media content
 MediaGrid/
 ├── Client/                     # React frontend (Vite)
 │   ├── public/
+│   │   ├── logo.svg                 # Application favicon and branding
 │   │   └── vite.svg
 │   ├── src/
 │   │   ├── components/         # React components
 │   │   │   ├── FileManager.jsx      # Main file browser
 │   │   │   ├── VideoPreviewModal.jsx # Video player modal
-│   │   │   └── DiskUsageStats.jsx   # Storage statistics
+│   │   │   └── SystemStats.jsx      # System monitoring (CPU, RAM, Disk)
 │   │   ├── assets/             # Static assets
 │   │   ├── App.jsx             # Main app component
 │   │   ├── App.css             # Global styles
@@ -151,7 +156,8 @@ MediaGrid/
 
 | Method | Endpoint | Description | Parameters |
 |--------|----------|-------------|------------|
-| `GET` | `/api/files` | List files and folders | `?path=/folder/path` |
+| `GET` | `/api/files` | List files and folders + system stats | `?path=/folder/path` |
+| `GET` | `/api/system-stats` | Get CPU, RAM, and disk usage | None |
 | `POST` | `/api/upload` | Upload single file | `FormData: file, path` |
 | `POST` | `/api/upload-chunk` | Upload file chunks | `Query: filename, chunkIndex, totalChunks, targetPath` |
 | `POST` | `/api/folder` | Create new folder | `Body: name, path` |
@@ -165,9 +171,9 @@ MediaGrid/
 ## 🎯 Usage Guide
 
 ### 📤 Uploading Files
-- **Drag & Drop**: Simply drag files into the blue drop zone
 - **File Picker**: Click "Upload Files" button to browse and select
 - **Folder Upload**: Click "Upload Folder" to upload entire directories
+- **Automatic File Naming**: Spaces in filenames are automatically replaced with hyphens
 - **Large Files**: Files over 50MB use chunked upload automatically
 - **Network Resilience**: Automatic retry with exponential backoff for failed chunks
 - **Resume Uploads**: Interrupted uploads can be resumed by re-selecting the same file
@@ -175,7 +181,15 @@ MediaGrid/
 - **Multiple Files**: Select multiple files for batch upload
 - **GB-Scale Support**: Optimized for multi-gigabyte file uploads
 
-### 📁 File & Folder Management
+### �️ System Monitoring
+- **Real-time Stats**: Monitor CPU usage, RAM usage, and disk space
+- **Auto-refresh**: Statistics update automatically every 30 seconds
+- **Manual Refresh**: Click the refresh button for instant updates
+- **Performance Efficient**: Uses Linux /proc filesystem for low system impact
+- **Responsive Design**: Compact view on mobile, full stats on desktop
+- **Visual Indicators**: Color-coded usage levels with percentage displays
+
+### �📁 File & Folder Management
 - **Navigation**: Click folder names or use breadcrumb navigation
 - **Create Folders**: Use "New Folder" button
 - **Selection Mode**: Toggle selection mode for bulk operations
