@@ -691,9 +691,8 @@ function App() {
           <div className="flex justify-between items-center py-6">
             <div className="flex items-center space-x-8">
               <div>
-                <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                  MediaGrid
-                </h1>
+                <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">Learn</h1>
+                <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">MediaGrid</h1>
                 <p className="text-sm text-gray-600 mt-1 font-medium">Professional Video File Manager</p>
               </div>
               
