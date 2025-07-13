@@ -8,7 +8,9 @@ A modern, local-first web application for managing video files and media content
 - Browse, upload, delete, rename files and folders
 - Drag & drop file uploads with visual feedback
 - Multiple file selection and bulk operations
-- Chunked uploads for large files (>50MB)
+- **Robust chunked uploads** for large files (>50MB) with automatic retry
+- **Resume capability** - continue interrupted uploads from where they left off
+- **Network failure resilience** - automatic retry with exponential backoff
 - Real-time file listing and navigation
 - Copy absolute links for files and folders
 - Breadcrumb navigation with modern UI
@@ -36,6 +38,9 @@ A modern, local-first web application for managing video files and media content
 ### 🔧 **Technical Features**
 - RESTful API with Express.js
 - Memory-efficient file uploads
+- **Enterprise-grade upload reliability** with chunk-level retry logic
+- **Progress persistence** - uploads survive browser refreshes and network failures
+- **Intelligent resume** - automatically detects and skips completed chunks
 - Direct file storage without temporary files
 - Path-based file organization
 - CORS configuration for cross-origin requests
@@ -128,6 +133,7 @@ MediaGrid/
 | `DELETE` | `/api/file` | Delete file | `Body: path` |
 | `DELETE` | `/api/folder` | Delete folder | `Body: path` |
 | `POST` | `/api/rename` | Rename file/folder | `Body: oldPath, newName` |
+| `GET` | `/api/check-chunks` | Check existing chunks for resume | `Query: filename, targetPath, totalChunks` |
 | `GET` | `/api/health` | Health check | None |
 | `GET` | `/videos/*` | Serve static files | File path |
 
@@ -138,7 +144,11 @@ MediaGrid/
 - **File Picker**: Click "Upload Files" button to browse and select
 - **Folder Upload**: Click "Upload Folder" to upload entire directories
 - **Large Files**: Files over 50MB use chunked upload automatically
+- **Network Resilience**: Automatic retry with exponential backoff for failed chunks
+- **Resume Uploads**: Interrupted uploads can be resumed by re-selecting the same file
+- **Progress Persistence**: Upload progress is saved and survives browser refreshes
 - **Multiple Files**: Select multiple files for batch upload
+- **GB-Scale Support**: Optimized for multi-gigabyte file uploads
 
 ### 📁 File & Folder Management
 - **Navigation**: Click folder names or use breadcrumb navigation
@@ -257,37 +267,48 @@ CMD ["npm", "start"]
 
 ## Troubleshooting
 
-### FFmpeg Issues
-- Ensure FFmpeg is installed and in PATH
-- Check console for FFmpeg error messages
-- Verify video file formats are supported
-
 ### Upload Failures
 - Check available disk space
 - Verify file permissions on upload directory
-- Check file size limits (default: no limit set)
+- Check file size limits (default: 5GB limit)
+- **For interrupted uploads**: Look for blue "Incomplete Uploads" notification
+- **To resume**: Re-select the same file - the system automatically skips completed chunks
+- **Clear stuck uploads**: Use the "Clear" button in the pending uploads section
+- **Network issues**: Uploads automatically retry failed chunks up to 5 times
 
 ### Performance
-- Large video files may take time to compress
-- Consider adjusting FFmpeg preset for speed vs quality
-- Monitor disk space usage
+- Large files may take time to upload depending on your network speed
+- Monitor disk space usage to ensure adequate storage
 
-## License
+## 📄 License
 
-This project is open source. Feel free to modify and distribute.
+**MediaGrid Proprietary License**  
+Copyright © 2025 Muhammad Ahmed Raza (professionally known as Mark)
 
-## Contributing
+This software is proprietary and all rights are reserved.
 
-1. Fork the repository
+**Restrictions:**
+- No modification, distribution, or resale without written permission
+- No use in public-facing or multi-client environments without authorization
+- No reverse engineering or decompilation
+
+For commercial licensing inquiries, contact: **developer.mahmedraza@gmail.com**
+
+## 🤝 Contributing
+
+**Note:** This is proprietary software with restricted access.
+
+For authorized contributors:
+1. Contact the developer for permission
 2. Create a feature branch
 3. Make your changes
 4. Test thoroughly
-5. Submit a pull request
+5. Submit a pull request for review
 
 ---
 
-**Built with:**
-- Backend: Node.js, Express, FFmpeg, Multer
-- Frontend: React, Vite, Tailwind CSS, React Hot Toast
-- File Management: fs-extra
-- Video Processing: fluent-ffmpeg
+**Built with ❤️ by:**
+- **Developer:** Muhammad Ahmed Raza (professionally known as Mark)
+- **Backend:** Node.js, Express, Multer
+- **Frontend:** React, Vite, Tailwind CSS, React Hot Toast
+- **File Management:** fs-extra

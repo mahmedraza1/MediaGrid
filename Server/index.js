@@ -38,6 +38,45 @@ const upload = multer({
   }
 });
 
+// Check existing chunks for resume functionality
+app.get('/api/check-chunks', async (req, res) => {
+  try {
+    const { filename, targetPath, totalChunks } = req.query;
+    
+    if (!filename || !totalChunks) {
+      return res.status(400).json({ error: 'Missing required parameters' });
+    }
+    
+    const uploadsPath = path.join(UPLOADS_DIR, targetPath || '/');
+    const tempDir = path.join(uploadsPath, '.chunks');
+    
+    const existingChunks = [];
+    
+    // Check if temp directory exists
+    if (await fs.pathExists(tempDir)) {
+      const files = await fs.readdir(tempDir);
+      const fileChunks = files.filter(chunk => chunk.startsWith(`${filename}.part`));
+      
+      // Extract chunk indices
+      fileChunks.forEach(chunkFile => {
+        const match = chunkFile.match(new RegExp(`^${filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.part(\\d+)$`));
+        if (match) {
+          existingChunks.push(parseInt(match[1]));
+        }
+      });
+    }
+    
+    res.json({
+      existingChunks: existingChunks.sort((a, b) => a - b),
+      totalFound: existingChunks.length,
+      totalExpected: parseInt(totalChunks)
+    });
+  } catch (error) {
+    console.error('Check chunks error:', error);
+    res.status(500).json({ error: 'Failed to check existing chunks' });
+  }
+});
+
 // Chunked upload support
 app.post('/api/upload-chunk', express.raw({ type: 'application/octet-stream', limit: '50mb' }), async (req, res) => {
   try {

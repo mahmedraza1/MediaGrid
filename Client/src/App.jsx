@@ -15,6 +15,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState(null);
   const [isVideoModalOpen, setIsVideoModalOpen] = useState(false);
+  const [pendingUploads, setPendingUploads] = useState([]);
 
   // Check for path parameter in URL on component mount
   useEffect(() => {
@@ -170,83 +171,190 @@ function App() {
     }
   };
 
-  // Chunked upload for large files (>50MB)
+  // Enhanced chunked upload with retry logic for GB-sized files
   const uploadFileChunked = async (file, path = '/', batchInfo = null) => {
     const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB chunks
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
     const toastId = batchInfo ? batchInfo.toastId : `upload-${file.name}-${Date.now()}`;
+    const uploadId = `${file.name}-${file.size}-${file.lastModified}`;
+    
+    // Retry configuration
+    const MAX_RETRIES = 5;
+    const BASE_RETRY_DELAY = 1000; // 1 second
+    const MAX_RETRY_DELAY = 30000; // 30 seconds
+    
+    // Load progress from localStorage
+    const progressKey = `upload_progress_${uploadId}`;
+    let uploadProgress = JSON.parse(localStorage.getItem(progressKey) || '{}');
+    let startChunkIndex = 0;
+    
+    // Find the last successfully uploaded chunk
+    if (uploadProgress.completedChunks) {
+      const completedChunks = Object.keys(uploadProgress.completedChunks).map(Number).sort((a, b) => a - b);
+      if (completedChunks.length > 0) {
+        startChunkIndex = completedChunks[completedChunks.length - 1] + 1;
+        console.log(`Resuming upload from chunk ${startChunkIndex} of ${totalChunks}`);
+      }
+    } else {
+      uploadProgress.completedChunks = {};
+      uploadProgress.totalChunks = totalChunks;
+      uploadProgress.fileName = file.name;
+      uploadProgress.startTime = Date.now();
+    }
+    
+    // Save initial progress
+    localStorage.setItem(progressKey, JSON.stringify(uploadProgress));
     
     try {
-      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+      // Check server for existing chunks first
+      if (startChunkIndex > 0) {
+        try {
+          const checkResponse = await fetch(`${API_BASE_URL}/check-chunks?filename=${encodeURIComponent(file.name)}&targetPath=${encodeURIComponent(path)}&totalChunks=${totalChunks}`);
+          if (checkResponse.ok) {
+            const checkData = await checkResponse.json();
+            if (checkData.existingChunks) {
+              // Update our progress with server state
+              checkData.existingChunks.forEach(chunkIndex => {
+                uploadProgress.completedChunks[chunkIndex] = true;
+              });
+              const serverCompletedChunks = Object.keys(uploadProgress.completedChunks).map(Number).sort((a, b) => a - b);
+              if (serverCompletedChunks.length > 0) {
+                startChunkIndex = Math.max(startChunkIndex, serverCompletedChunks[serverCompletedChunks.length - 1] + 1);
+              }
+              localStorage.setItem(progressKey, JSON.stringify(uploadProgress));
+            }
+          }
+        } catch (error) {
+          console.warn('Could not check existing chunks, continuing with local progress:', error);
+        }
+      }
+
+      for (let chunkIndex = startChunkIndex; chunkIndex < totalChunks; chunkIndex++) {
+        // Skip if chunk is already completed
+        if (uploadProgress.completedChunks[chunkIndex]) {
+          continue;
+        }
+
         const start = chunkIndex * CHUNK_SIZE;
         const end = Math.min(start + CHUNK_SIZE, file.size);
         const chunk = file.slice(start, end);
         
-        const chunkProgress = Math.round(((chunkIndex + 1) / totalChunks) * 100);
+        const overallProgress = Math.round(((Object.keys(uploadProgress.completedChunks).length + 1) / totalChunks) * 100);
+        let retryAttempt = 0;
+        let chunkUploaded = false;
         
-        // Update progress notification
-        if (!batchInfo) {
-          toast.loading(
-            <div className="flex items-center space-x-3">
-              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-              <div className="flex-1">
-                <div className="font-medium text-sm text-gray-900">Uploading Large File</div>
-                <div className="text-xs text-gray-600 mb-1">{file.name}</div>
-                <div className="w-full bg-gray-200 rounded-full h-1.5">
-                  <div 
-                    className="bg-blue-600 h-1.5 rounded-full transition-all duration-300" 
-                    style={{ width: `${chunkProgress}%` }}
-                  ></div>
-                </div>
-                <div className="text-xs text-gray-500 mt-1">
-                  Chunk {chunkIndex + 1} of {totalChunks} ({chunkProgress}%)
-                </div>
-              </div>
-            </div>,
-            { 
-              id: toastId,
-              duration: Infinity
+        while (!chunkUploaded && retryAttempt <= MAX_RETRIES) {
+          try {
+            // Update progress notification
+            if (!batchInfo) {
+              const retryText = retryAttempt > 0 ? ` (Retry ${retryAttempt}/${MAX_RETRIES})` : '';
+              toast.loading(
+                <div className="flex items-center space-x-3">
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                  <div className="flex-1">
+                    <div className="font-medium text-sm text-gray-900">Uploading Large File{retryText}</div>
+                    <div className="text-xs text-gray-600 mb-1">{file.name}</div>
+                    <div className="w-full bg-gray-200 rounded-full h-1.5">
+                      <div 
+                        className="bg-blue-600 h-1.5 rounded-full transition-all duration-300" 
+                        style={{ width: `${overallProgress}%` }}
+                      ></div>
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      Chunk {chunkIndex + 1} of {totalChunks} ({overallProgress}%)
+                      {retryAttempt > 0 && <span className="text-orange-600 ml-2">⚠️ Retrying...</span>}
+                    </div>
+                  </div>
+                </div>,
+                { 
+                  id: toastId,
+                  duration: Infinity
+                }
+              );
             }
-          );
-        }
 
-        const response = await fetch(`${API_BASE_URL}/upload-chunk?filename=${encodeURIComponent(file.name)}&chunkIndex=${chunkIndex}&totalChunks=${totalChunks}&targetPath=${encodeURIComponent(path)}`, {
-          method: 'POST',
-          body: chunk,
-          headers: {
-            'Content-Type': 'application/octet-stream'
-          }
-        });
+            const response = await fetch(`${API_BASE_URL}/upload-chunk?filename=${encodeURIComponent(file.name)}&chunkIndex=${chunkIndex}&totalChunks=${totalChunks}&targetPath=${encodeURIComponent(path)}`, {
+              method: 'POST',
+              body: chunk,
+              headers: {
+                'Content-Type': 'application/octet-stream'
+              },
+              // Add timeout for better error handling
+              signal: AbortSignal.timeout(60000) // 60 second timeout per chunk
+            });
 
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || 'Chunk upload failed');
-        }
-        
-        const data = await response.json();
-        
-        // If this was the last chunk and file is complete
-        if (data.chunked) {
-          // Handle completion
-          if (!batchInfo) {
-            toast.success(
-              <div>
-                <div className="font-medium text-sm text-gray-900">✅ Upload Complete!</div>
-                <div className="text-xs text-gray-600">{file.name}</div>
-              </div>,
-              { id: toastId, duration: 4000 }
-            );
+            if (!response.ok) {
+              const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+              throw new Error(errorData.error || `Chunk upload failed: HTTP ${response.status}`);
+            }
             
-            // Refresh immediately after upload
-            await loadFiles(currentPath);
+            const data = await response.json();
+            
+            // Mark chunk as completed
+            uploadProgress.completedChunks[chunkIndex] = true;
+            uploadProgress.lastUpdated = Date.now();
+            localStorage.setItem(progressKey, JSON.stringify(uploadProgress));
+            
+            chunkUploaded = true;
+            
+            // If this was the last chunk and file is complete
+            if (data.chunked) {
+              // Clear progress from localStorage
+              localStorage.removeItem(progressKey);
+              
+              // Check for other pending uploads
+              checkPendingUploads();
+              
+              // Handle completion
+              if (!batchInfo) {
+                toast.success(
+                  <div>
+                    <div className="font-medium text-sm text-gray-900">✅ Upload Complete!</div>
+                    <div className="text-xs text-gray-600">{file.name}</div>
+                    <div className="text-xs text-green-600 mt-1">
+                      {totalChunks} chunks uploaded successfully
+                    </div>
+                  </div>,
+                  { id: toastId, duration: 4000 }
+                );
+                
+                // Refresh immediately after upload
+                await loadFiles(currentPath);
+              }
+              return true;
+            }
+            
+          } catch (error) {
+            retryAttempt++;
+            console.warn(`Chunk ${chunkIndex} upload attempt ${retryAttempt} failed:`, error);
+            
+            if (retryAttempt <= MAX_RETRIES) {
+              // Calculate exponential backoff with jitter
+              const baseDelay = Math.min(BASE_RETRY_DELAY * Math.pow(2, retryAttempt - 1), MAX_RETRY_DELAY);
+              const jitter = Math.random() * 0.3 * baseDelay; // Add up to 30% jitter
+              const delay = baseDelay + jitter;
+              
+              console.log(`Retrying chunk ${chunkIndex} in ${Math.round(delay)}ms...`);
+              await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+              // Max retries exceeded for this chunk
+              throw new Error(`Chunk ${chunkIndex} failed after ${MAX_RETRIES} retries: ${error.message}`);
+            }
           }
-          break;
         }
       }
       
+      // If we get here, all chunks were uploaded successfully
+      localStorage.removeItem(progressKey);
       return true;
+      
     } catch (error) {
       console.error('Chunked upload error:', error);
+      
+      // Save current progress for potential resume
+      uploadProgress.lastError = error.message;
+      uploadProgress.lastUpdated = Date.now();
+      localStorage.setItem(progressKey, JSON.stringify(uploadProgress));
       
       if (!batchInfo) {
         toast.error(
@@ -254,8 +362,11 @@ function App() {
             <div className="font-medium text-sm text-gray-900">❌ Upload Failed</div>
             <div className="text-xs text-gray-600">{file.name}</div>
             <div className="text-xs text-red-600 mt-1">{error.message}</div>
+            <div className="text-xs text-blue-600 mt-2">
+              💾 Progress saved - you can resume this upload later
+            </div>
           </div>,
-          { id: toastId, duration: 6000 }
+          { id: toastId, duration: 8000 }
         );
       }
       
@@ -461,6 +572,69 @@ function App() {
     };
   }, []);
 
+  // Check for pending uploads on app load
+  useEffect(() => {
+    checkPendingUploads();
+  }, []);
+
+  // Check for pending/failed uploads in localStorage
+  const checkPendingUploads = () => {
+    const pending = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('upload_progress_')) {
+        try {
+          const progress = JSON.parse(localStorage.getItem(key));
+          if (progress && progress.fileName) {
+            const completedChunks = Object.keys(progress.completedChunks || {}).length;
+            if (completedChunks < progress.totalChunks) {
+              pending.push({
+                key,
+                fileName: progress.fileName,
+                totalChunks: progress.totalChunks,
+                completedChunks,
+                progress: Math.round((completedChunks / progress.totalChunks) * 100),
+                lastUpdated: progress.lastUpdated,
+                hasError: !!progress.lastError
+              });
+            } else {
+              // Upload was completed, clean up
+              localStorage.removeItem(key);
+            }
+          }
+        } catch (error) {
+          console.warn('Invalid upload progress data:', key);
+          localStorage.removeItem(key);
+        }
+      }
+    }
+    setPendingUploads(pending);
+  };
+
+  // Clear a specific pending upload
+  const clearPendingUpload = (key) => {
+    localStorage.removeItem(key);
+    checkPendingUploads();
+    toast.success('Upload progress cleared');
+  };
+
+  // Resume a pending upload notification
+  const showResumeUploadInfo = (uploadData) => {
+    toast.error(
+      <div>
+        <div className="font-medium text-sm text-gray-900">Resume Upload</div>
+        <div className="text-xs text-gray-600 mt-1">
+          To resume "{uploadData.fileName}" ({uploadData.progress}% complete), 
+          please re-select the same file and upload again.
+        </div>
+        <div className="text-xs text-blue-600 mt-1">
+          ✨ The system will automatically skip already uploaded chunks
+        </div>
+      </div>,
+      { duration: 8000 }
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <Toaster 
@@ -542,6 +716,76 @@ function App() {
         </div>
       </header>
 
+      {/* Pending Uploads Notification */}
+      {pendingUploads.length > 0 && (
+        <div className="mb-6">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center space-x-2">
+                <div className="w-4 h-4 bg-blue-500 rounded-full animate-pulse"></div>
+                <h3 className="text-sm font-semibold text-blue-900">
+                  {pendingUploads.length} Incomplete Upload{pendingUploads.length > 1 ? 's' : ''}
+                </h3>
+              </div>
+              <button
+                onClick={() => setPendingUploads([])}
+                className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                title="Hide notifications"
+              >
+                Hide
+              </button>
+            </div>
+            <div className="space-y-2">
+              {pendingUploads.map((upload) => (
+                <div key={upload.key} className="flex items-center justify-between bg-white rounded-lg p-3 border border-blue-100">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-sm font-medium text-gray-900 truncate">
+                        {upload.fileName}
+                      </span>
+                      {upload.hasError && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">
+                          Failed
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center space-x-4 mt-1">
+                      <div className="text-xs text-gray-500">
+                        {upload.completedChunks}/{upload.totalChunks} chunks ({upload.progress}%)
+                      </div>
+                      <div className="w-24 bg-gray-200 rounded-full h-1.5">
+                        <div 
+                          className="bg-blue-600 h-1.5 rounded-full transition-all duration-300" 
+                          style={{ width: `${upload.progress}%` }}
+                        ></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center space-x-2 ml-4">
+                    <button
+                      onClick={() => showResumeUploadInfo(upload)}
+                      className="text-xs bg-blue-100 text-blue-700 px-3 py-1 rounded-md hover:bg-blue-200 transition-colors font-medium"
+                    >
+                      Resume
+                    </button>
+                    <button
+                      onClick={() => clearPendingUpload(upload.key)}
+                      className="text-xs bg-gray-100 text-gray-700 px-3 py-1 rounded-md hover:bg-gray-200 transition-colors"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-3 text-xs text-blue-700 bg-blue-100 rounded-lg p-2">
+              💡 <strong>Tip:</strong> To resume an upload, re-select the same file and upload again. 
+              The system will automatically skip chunks that were already uploaded.
+            </div>
+          </div>
+        </div>
+      )}
+      
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <FileManager
