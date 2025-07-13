@@ -5,7 +5,9 @@ import VideoPreviewModal from './components/VideoPreviewModal';
 import DiskUsageStats from './components/DiskUsageStats';
 import './App.css';
 
-const API_BASE_URL = 'http://localhost:5000/api';
+// API Configuration - automatically adapts to development/production
+const API_BASE_URL = import.meta.env.VITE_API_URL || 
+  (import.meta.env.DEV ? 'http://localhost:5000/api' : '/api');
 
 function App() {
   const [currentPath, setCurrentPath] = useState('/');

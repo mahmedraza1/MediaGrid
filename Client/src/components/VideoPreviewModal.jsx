@@ -4,13 +4,27 @@ import { toast } from 'react-hot-toast';
 const VideoPreviewModal = ({ isOpen, onClose, video }) => {
   if (!isOpen || !video) return null;
 
-  // Get the actual server URL - replace client port with server port  
-  const baseUrl = window.location.origin.replace(/:\d+/, ':5000');
+  // Get the video server URL - adapts to development/production
+  const getVideoBaseUrl = () => {
+    const customApiUrl = import.meta.env.VITE_API_URL;
+    if (customApiUrl) {
+      // If custom API URL is set, replace /api with /videos
+      return customApiUrl.replace('/api', '/videos');
+    }
+    
+    // In development, use separate server on port 5000
+    if (import.meta.env.DEV) {
+      return window.location.origin.replace(/:\d+/, ':5000') + '/videos';
+    }
+    
+    // In production, same origin
+    return window.location.origin + '/videos';
+  };
   
   // Encode each path segment properly while preserving the path structure
   const pathSegments = video.path.split('/').map(segment => encodeURIComponent(segment));
   const encodedPath = pathSegments.join('/');
-  const videoUrl = `${baseUrl}/videos${encodedPath}`;
+  const videoUrl = `${getVideoBaseUrl()}${encodedPath}`;
 
   const handleBackdropClick = (e) => {
     if (e.target === e.currentTarget) {

@@ -87,10 +87,34 @@ A modern, local-first web application for managing video files and media content
    npm run dev
    ```
 
+   **For production mode (single server):**
+   ```bash
+   # Quick production startup (builds and starts automatically)
+   ./start-prod.sh
+   
+   # Or manually:
+   cd Client && npm run build && cd ../Server && npm start
+   ```
+
 4. **Access the application:**
+   
+   **Development mode (separate servers):**
    - Frontend: http://localhost:5173 (Vite dev server)
    - Backend API: http://localhost:5000
    - File serving: http://localhost:5000/videos/
+
+   **Production mode (single server):**
+   ```bash
+   # Build the client first
+   cd Client
+   npm run build
+   
+   # Start production server (serves both React app and API)
+   cd ../Server
+   npm start
+   
+   # Access everything at: http://localhost:5000
+   ```
 
 ## 📁 Project Structure
 
@@ -119,6 +143,7 @@ MediaGrid/
 │   └── package.json
 ├── .gitignore                  # Git ignore rules
 ├── start-dev.sh               # Development startup script
+├── start-prod.sh              # Production startup script
 └── README.md
 ```
 
@@ -236,22 +261,45 @@ npm test
 cd Client
 npm run build
 
-# The dist/ folder contains the production build
+# Start production server (serves both API and React app)
+cd ../Server
+npm start
+
+# Access the full application at http://localhost:5000
 ```
 
+**Note:** When the client build exists (`Client/dist/`), the server automatically serves the React application on the same port as the API. This eliminates the need for separate frontend/backend servers in production.
+
 ### 🖥️ Local Network Access
-1. Find your machine's IP address
-2. Update API_BASE_URL in client to use IP instead of localhost
-3. Configure CORS in server for your IP range
-4. Access via `http://YOUR_IP:5173`
+1. Build the client: `cd Client && npm run build`
+2. Find your machine's IP address
+3. Start the server: `cd Server && npm start`
+4. Access via `http://YOUR_IP:5000`
 
 ### ☁️ VPS/Cloud Deployment
 1. **Build client**: `npm run build` in Client directory
-2. **Configure server** to serve static files from build
-3. **Set up reverse proxy** (nginx recommended)
+2. **Start server**: The server automatically detects and serves the build files
+3. **Set up reverse proxy** (nginx recommended) - point to single port
 4. **Configure SSL** with Let's Encrypt
 5. **Set environment variables** for production
 6. **Configure firewall** and security
+
+**Example nginx config:**
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+    
+    location / {
+        proxy_pass http://localhost:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+    }
+}
+```
 
 ### 🐳 Docker (Coming Soon)
 ```dockerfile

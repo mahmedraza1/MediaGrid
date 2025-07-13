@@ -35,9 +35,6 @@ const FileManager = ({
   // Copy absolute link to clipboard
   const copyAbsoluteLink = async (itemPath, isFolder = false) => {
     try {
-      // Get the actual server URL - replace client port with server port
-      const baseUrl = window.location.origin.replace(/:\d+/, ':5000');
-      
       let absoluteUrl;
       if (isFolder) {
         // For folders, create a link to the MediaGrid app with the folder path
@@ -45,10 +42,27 @@ const FileManager = ({
         absoluteUrl = `${window.location.origin}?path=${encodedPath}`;
       } else {
         // For files, create a direct link to the file on the server
+        // Get the file server URL - adapts to development/production
+        const getFileBaseUrl = () => {
+          const customApiUrl = import.meta.env.VITE_API_URL;
+          if (customApiUrl) {
+            // If custom API URL is set, replace /api with /videos
+            return customApiUrl.replace('/api', '/videos');
+          }
+          
+          // In development, use separate server on port 5000
+          if (import.meta.env.DEV) {
+            return window.location.origin.replace(/:\d+/, ':5000') + '/videos';
+          }
+          
+          // In production, same origin
+          return window.location.origin + '/videos';
+        };
+        
         // Encode each path segment properly while preserving the path structure
         const pathSegments = itemPath.split('/').map(segment => encodeURIComponent(segment));
         const encodedPath = pathSegments.join('/');
-        absoluteUrl = `${baseUrl}/videos${encodedPath}`;
+        absoluteUrl = `${getFileBaseUrl()}${encodedPath}`;
         
         console.log('Generated file URL:', absoluteUrl); // Debug log
       }
