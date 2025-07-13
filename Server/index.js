@@ -25,6 +25,18 @@ app.use(express.urlencoded({ extended: true }));
 // Serve static files (uploaded videos)
 app.use('/videos', express.static(UPLOADS_DIR));
 
+// Serve client build files in production
+const CLIENT_BUILD_PATH = path.join(__dirname, '../Client/dist');
+const clientBuildExists = await fs.pathExists(CLIENT_BUILD_PATH);
+
+if (clientBuildExists) {
+  console.log('📦 Serving client build files from:', CLIENT_BUILD_PATH);
+  // Serve static files from the React build
+  app.use(express.static(CLIENT_BUILD_PATH));
+} else {
+  console.log('⚠️  No client build found. Run "npm run build" in Client directory for production.');
+}
+
 // Configure multer for direct file uploads
 const upload = multer({ 
   storage: multer.memoryStorage(), // Use memory storage first
@@ -431,7 +443,26 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
+// Catch-all handler for SPA routing (must be last)
+if (clientBuildExists) {
+  app.use((req, res, next) => {
+    // Don't serve index.html for API routes or video files
+    if (req.path.startsWith('/api/') || req.path.startsWith('/videos/')) {
+      return next(); // Let other middleware handle it
+    }
+    
+    // For all other routes, serve the React app
+    res.sendFile(path.join(CLIENT_BUILD_PATH, 'index.html'));
+  });
+}
+
 app.listen(PORT, () => {
   console.log(`🚀 MediaGrid Server running on http://localhost:${PORT}`);
   console.log(`📁 Upload directory: ${UPLOADS_DIR}`);
+  if (clientBuildExists) {
+    console.log(`🌐 Serving React app at http://localhost:${PORT}`);
+    console.log(`🔧 API endpoints available at http://localhost:${PORT}/api/`);
+  } else {
+    console.log(`🔧 API-only mode - run "npm run build" in Client directory for full app`);
+  }
 });
