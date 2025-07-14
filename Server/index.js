@@ -526,23 +526,46 @@ app.post('/api/rename', async (req, res) => {
       return res.status(400).json({ error: 'Old path and new name are required' });
     }
 
+    // Sanitize the new name on server side as well (consistency with upload)
+    const sanitizedNewName = sanitizeFilename(newName);
+
     const fullOldPath = path.join(UPLOADS_DIR, oldPath);
-    const fullNewPath = path.join(path.dirname(fullOldPath), newName);
+    const fullNewPath = path.join(path.dirname(fullOldPath), sanitizedNewName);
     
     // Ensure both paths are within uploads directory
     if (!fullOldPath.startsWith(UPLOADS_DIR) || !fullNewPath.startsWith(UPLOADS_DIR)) {
       return res.status(400).json({ error: 'Invalid path' });
     }
 
+    // Check if source exists
+    if (!await fs.pathExists(fullOldPath)) {
+      return res.status(404).json({ error: 'Source file or folder not found' });
+    }
+
+    // Check if destination already exists
+    if (await fs.pathExists(fullNewPath)) {
+      return res.status(409).json({ error: 'A file or folder with that name already exists' });
+    }
+
     await fs.move(fullOldPath, fullNewPath);
     
     res.json({
       message: 'Renamed successfully',
-      newPath: path.relative(UPLOADS_DIR, fullNewPath)
+      newPath: path.relative(UPLOADS_DIR, fullNewPath),
+      sanitizedName: sanitizedNewName
     });
   } catch (error) {
     console.error('Error renaming:', error);
-    res.status(500).json({ error: 'Failed to rename' });
+    // Provide more specific error messages
+    if (error.code === 'ENOENT') {
+      res.status(404).json({ error: 'File or folder not found' });
+    } else if (error.code === 'EEXIST') {
+      res.status(409).json({ error: 'A file or folder with that name already exists' });
+    } else if (error.code === 'EACCES' || error.code === 'EPERM') {
+      res.status(403).json({ error: 'Permission denied' });
+    } else {
+      res.status(500).json({ error: `Failed to rename: ${error.message}` });
+    }
   }
 });
 

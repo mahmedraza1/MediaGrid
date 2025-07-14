@@ -792,22 +792,104 @@ function App() {
     }
   };
 
-  // Rename file or folder
+  // Rename file or folder with automatic space-to-hyphen replacement
   const renameItem = async (oldPath, newName) => {
     try {
+      // Sanitize the new name by replacing spaces with hyphens
+      const sanitizedName = newName.replace(/\s+/g, '-');
+      
+      // Show a notification if the name was modified
+      if (sanitizedName !== newName) {
+        toast(
+          <div>
+            <div className="font-medium text-sm text-gray-900">✏️ Name Sanitized</div>
+            <div className="text-xs text-gray-600">Spaces replaced with hyphens</div>
+            <div className="text-xs text-blue-600 mt-1">"{newName}" → "{sanitizedName}"</div>
+          </div>,
+          { 
+            duration: 3000,
+            style: {
+              border: '1px solid #3b82f6',
+              background: '#eff6ff',
+              color: '#1e40af',
+            },
+            icon: '✏️'
+          }
+        );
+      }
+      
       const response = await fetch(`${API_BASE_URL}/rename`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ oldPath, newName }),
+        body: JSON.stringify({ oldPath, newName: sanitizedName }),
       });
 
-      if (!response.ok) throw new Error('Failed to rename');
+      if (!response.ok) {
+        // Get detailed error message from server
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(errorData.error || `HTTP ${response.status}: Failed to rename`);
+      }
+
+      const data = await response.json();
       
-      toast.success('Renamed successfully!');
+      // Show success with final name if it was further sanitized on server
+      const finalName = data.sanitizedName || sanitizedName;
+      if (finalName !== sanitizedName) {
+        toast(
+          <div>
+            <div className="font-medium text-sm text-gray-900">🔧 Server Sanitization</div>
+            <div className="text-xs text-gray-600">Name further cleaned by server</div>
+            <div className="text-xs text-blue-600 mt-1">"{sanitizedName}" → "{finalName}"</div>
+          </div>,
+          { 
+            duration: 3000,
+            style: {
+              border: '1px solid #3b82f6',
+              background: '#eff6ff',
+              color: '#1e40af',
+            },
+            icon: '🔧'
+          }
+        );
+      }
+      
+      toast.success(
+        <div>
+          <div className="font-medium text-sm text-gray-900">✅ Renamed Successfully!</div>
+          <div className="text-xs text-gray-600">New name: {finalName}</div>
+        </div>,
+        { duration: 4000 }
+      );
+      
       await loadFiles(currentPath);
     } catch (error) {
       console.error('Rename error:', error);
-      toast.error('Failed to rename');
+      
+      // Show specific error messages
+      let errorMessage = error.message;
+      let errorIcon = '❌';
+      
+      if (errorMessage.includes('already exists')) {
+        errorIcon = '⚠️';
+        errorMessage = 'A file or folder with that name already exists';
+      } else if (errorMessage.includes('not found')) {
+        errorIcon = '🔍';
+        errorMessage = 'The file or folder could not be found';
+      } else if (errorMessage.includes('Permission denied')) {
+        errorIcon = '🔒';
+        errorMessage = 'Permission denied - check file permissions';
+      }
+      
+      toast.error(
+        <div>
+          <div className="font-medium text-sm text-gray-900">{errorIcon} Rename Failed</div>
+          <div className="text-xs text-red-600 mt-1">{errorMessage}</div>
+          {newName !== newName.replace(/\s+/g, '-') && (
+            <div className="text-xs text-blue-600 mt-1">💡 Tip: Avoid special characters in names</div>
+          )}
+        </div>,
+        { duration: 6000 }
+      );
     }
   };
 
