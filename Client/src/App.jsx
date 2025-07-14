@@ -90,7 +90,7 @@ function App() {
     }
   };
 
-  // Upload file with progress
+  // Upload file with progress (no individual toasts for batch uploads)
   const uploadFile = async (file, path = '/', batchInfo = null) => {
     // Use chunked upload for files larger than 50MB
     const LARGE_FILE_THRESHOLD = 50 * 1024 * 1024; // 50MB
@@ -107,7 +107,7 @@ function App() {
     const toastId = batchInfo ? batchInfo.toastId : `upload-${file.name}-${Date.now()}`;
     
     try {
-      // Show progress notification for single files too
+      // Show progress notification only for single files (not in batch)
       if (!batchInfo) {
         toast.loading(
           <div className="flex items-center space-x-3">
@@ -119,33 +119,6 @@ function App() {
                 <div className="bg-blue-600 h-1.5 rounded-full animate-pulse" style={{ width: '60%' }}></div>
               </div>
               <div className="text-xs text-gray-500 mt-1">Processing...</div>
-            </div>
-          </div>,
-          { 
-            id: toastId,
-            duration: Infinity
-          }
-        );
-      } else {
-        // Update batch notification
-        const progress = Math.round(((batchInfo.currentIndex + 1) / batchInfo.totalFiles) * 100);
-        toast.loading(
-          <div className="flex items-center space-x-3">
-            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-            <div className="flex-1">
-              <div className="font-medium text-sm text-gray-900">
-                Uploading {batchInfo.folderName || 'Files'}
-              </div>
-              <div className="text-xs text-gray-600 mb-1">
-                {file.name} ({batchInfo.currentIndex + 1} of {batchInfo.totalFiles})
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-1.5">
-                <div 
-                  className="bg-blue-600 h-1.5 rounded-full transition-all duration-300" 
-                  style={{ width: `${progress}%` }}
-                ></div>
-              </div>
-              <div className="text-xs text-gray-500 mt-1">{progress}% complete</div>
             </div>
           </div>,
           { 
@@ -200,9 +173,10 @@ function App() {
     }
   };
 
-  // Enhanced chunked upload with retry logic for GB-sized files
+  // Enhanced chunked upload with concurrent chunk processing for GB-sized files
   const uploadFileChunked = async (file, path = '/', batchInfo = null) => {
     const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB chunks
+    const CONCURRENT_CHUNKS = 3; // Upload 3 chunks simultaneously
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
     const toastId = batchInfo ? batchInfo.toastId : `upload-${file.name}-${Date.now()}`;
     const uploadId = `${file.name}-${file.size}-${file.lastModified}`;
@@ -258,124 +232,149 @@ function App() {
         }
       }
 
+      // Process remaining chunks with concurrent upload
+      const remainingChunks = [];
       for (let chunkIndex = startChunkIndex; chunkIndex < totalChunks; chunkIndex++) {
-        // Skip if chunk is already completed
-        if (uploadProgress.completedChunks[chunkIndex]) {
-          continue;
+        if (!uploadProgress.completedChunks[chunkIndex]) {
+          remainingChunks.push(chunkIndex);
         }
+      }
 
-        const start = chunkIndex * CHUNK_SIZE;
-        const end = Math.min(start + CHUNK_SIZE, file.size);
-        const chunk = file.slice(start, end);
+      // Upload chunks in batches with concurrency
+      for (let i = 0; i < remainingChunks.length; i += CONCURRENT_CHUNKS) {
+        const chunkBatch = remainingChunks.slice(i, i + CONCURRENT_CHUNKS);
         
-        const overallProgress = Math.round(((Object.keys(uploadProgress.completedChunks).length + 1) / totalChunks) * 100);
-        let retryAttempt = 0;
-        let chunkUploaded = false;
-        
-        while (!chunkUploaded && retryAttempt <= MAX_RETRIES) {
-          try {
-            // Update progress notification
-            if (!batchInfo) {
-              const retryText = retryAttempt > 0 ? ` (Retry ${retryAttempt}/${MAX_RETRIES})` : '';
-              toast.loading(
-                <div className="flex items-center space-x-3">
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                  <div className="flex-1">
-                    <div className="font-medium text-sm text-gray-900">Uploading Large File{retryText}</div>
-                    <div className="text-xs text-gray-600 mb-1">{file.name}</div>
-                    <div className="w-full bg-gray-200 rounded-full h-1.5">
-                      <div 
-                        className="bg-blue-600 h-1.5 rounded-full transition-all duration-300" 
-                        style={{ width: `${overallProgress}%` }}
-                      ></div>
-                    </div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      Chunk {chunkIndex + 1} of {totalChunks} ({overallProgress}%)
-                      {retryAttempt > 0 && <span className="text-orange-600 ml-2">⚠️ Retrying...</span>}
-                    </div>
-                  </div>
-                </div>,
-                { 
-                  id: toastId,
-                  duration: Infinity
-                }
-              );
-            }
-
-            const response = await fetch(`${API_BASE_URL}/upload-chunk?filename=${encodeURIComponent(file.name)}&chunkIndex=${chunkIndex}&totalChunks=${totalChunks}&targetPath=${encodeURIComponent(path)}`, {
-              method: 'POST',
-              body: chunk,
-              headers: {
-                'Content-Type': 'application/octet-stream'
-              },
-              // Add timeout for better error handling
-              signal: AbortSignal.timeout(60000) // 60 second timeout per chunk
-            });
-
-            if (!response.ok) {
-              const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
-              throw new Error(errorData.error || `Chunk upload failed: HTTP ${response.status}`);
-            }
-            
-            const data = await response.json();
-            
-            // Mark chunk as completed
-            uploadProgress.completedChunks[chunkIndex] = true;
-            uploadProgress.lastUpdated = Date.now();
-            localStorage.setItem(progressKey, JSON.stringify(uploadProgress));
-            
-            chunkUploaded = true;
-            
-            // If this was the last chunk and file is complete
-            if (data.chunked) {
-              // Clear progress from localStorage
-              localStorage.removeItem(progressKey);
-              
-              // Check for other pending uploads
-              checkPendingUploads();
-              
-              // Handle completion
+        // Upload this batch of chunks concurrently
+        const chunkPromises = chunkBatch.map(async (chunkIndex) => {
+          const start = chunkIndex * CHUNK_SIZE;
+          const end = Math.min(start + CHUNK_SIZE, file.size);
+          const chunk = file.slice(start, end);
+          
+          let retryAttempt = 0;
+          let chunkUploaded = false;
+          
+          while (!chunkUploaded && retryAttempt <= MAX_RETRIES) {
+            try {
+              // Only update progress notification for single file uploads (not in batch)
               if (!batchInfo) {
-                toast.success(
-                  <div>
-                    <div className="font-medium text-sm text-gray-900">✅ Upload Complete!</div>
-                    <div className="text-xs text-gray-600">{file.name}</div>
-                    <div className="text-xs text-green-600 mt-1">
-                      {totalChunks} chunks uploaded successfully
+                const completedChunks = Object.keys(uploadProgress.completedChunks).length;
+                const overallProgress = Math.round((completedChunks / totalChunks) * 100);
+                const retryText = retryAttempt > 0 ? ` (Retry ${retryAttempt}/${MAX_RETRIES})` : '';
+                
+                toast.loading(
+                  <div className="flex items-center space-x-3">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                    <div className="flex-1">
+                      <div className="font-medium text-sm text-gray-900">Uploading Large File{retryText}</div>
+                      <div className="text-xs text-gray-600 mb-1">{file.name}</div>
+                      <div className="w-full bg-gray-200 rounded-full h-1.5">
+                        <div 
+                          className="bg-blue-600 h-1.5 rounded-full transition-all duration-300" 
+                          style={{ width: `${overallProgress}%` }}
+                        ></div>
+                      </div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        Chunk {chunkIndex + 1} of {totalChunks} ({overallProgress}%)
+                        {retryAttempt > 0 && <span className="text-orange-600 ml-2">⚠️ Retrying...</span>}
+                        <span className="text-blue-600 ml-2">🚀 Concurrent Upload</span>
+                      </div>
                     </div>
                   </div>,
-                  { id: toastId, duration: 4000 }
+                  { 
+                    id: toastId,
+                    duration: Infinity
+                  }
                 );
-                
-                // Refresh immediately after upload
-                await loadFiles(currentPath);
               }
-              return true;
-            }
-            
-          } catch (error) {
-            retryAttempt++;
-            console.warn(`Chunk ${chunkIndex} upload attempt ${retryAttempt} failed:`, error);
-            
-            if (retryAttempt <= MAX_RETRIES) {
-              // Calculate exponential backoff with jitter
-              const baseDelay = Math.min(BASE_RETRY_DELAY * Math.pow(2, retryAttempt - 1), MAX_RETRY_DELAY);
-              const jitter = Math.random() * 0.3 * baseDelay; // Add up to 30% jitter
-              const delay = baseDelay + jitter;
+
+              const response = await fetch(`${API_BASE_URL}/upload-chunk?filename=${encodeURIComponent(file.name)}&chunkIndex=${chunkIndex}&totalChunks=${totalChunks}&targetPath=${encodeURIComponent(path)}`, {
+                method: 'POST',
+                body: chunk,
+                headers: {
+                  'Content-Type': 'application/octet-stream'
+                },
+                signal: AbortSignal.timeout(60000) // 60 second timeout per chunk
+              });
+
+              if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+                throw new Error(errorData.error || `Chunk upload failed: HTTP ${response.status}`);
+              }
               
-              console.log(`Retrying chunk ${chunkIndex} in ${Math.round(delay)}ms...`);
-              await new Promise(resolve => setTimeout(resolve, delay));
-            } else {
-              // Max retries exceeded for this chunk
-              throw new Error(`Chunk ${chunkIndex} failed after ${MAX_RETRIES} retries: ${error.message}`);
+              const data = await response.json();
+              
+              // Mark chunk as completed
+              uploadProgress.completedChunks[chunkIndex] = true;
+              uploadProgress.lastUpdated = Date.now();
+              localStorage.setItem(progressKey, JSON.stringify(uploadProgress));
+              
+              chunkUploaded = true;
+              return data;
+              
+            } catch (error) {
+              retryAttempt++;
+              console.warn(`Chunk ${chunkIndex} upload attempt ${retryAttempt} failed:`, error);
+              
+              if (retryAttempt <= MAX_RETRIES) {
+                // Calculate exponential backoff with jitter
+                const baseDelay = Math.min(BASE_RETRY_DELAY * Math.pow(2, retryAttempt - 1), MAX_RETRY_DELAY);
+                const jitter = Math.random() * 0.3 * baseDelay;
+                const delay = baseDelay + jitter;
+                
+                console.log(`Retrying chunk ${chunkIndex} in ${Math.round(delay)}ms...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+              } else {
+                throw new Error(`Chunk ${chunkIndex} failed after ${MAX_RETRIES} retries: ${error.message}`);
+              }
             }
           }
+        });
+
+        // Wait for this batch to complete before starting the next batch
+        try {
+          const results = await Promise.allSettled(chunkPromises);
+          
+          // Check if any chunks in this batch failed
+          const failedChunks = results.filter(result => result.status === 'rejected');
+          if (failedChunks.length > 0) {
+            throw new Error(`${failedChunks.length} chunks failed in batch`);
+          }
+          
+          // Check if the file is complete after this batch
+          const completedChunksCount = Object.keys(uploadProgress.completedChunks).length;
+          if (completedChunksCount >= totalChunks) {
+            // File is complete - clear progress and notify
+            localStorage.removeItem(progressKey);
+            checkPendingUploads();
+            
+            // Only show completion notification for single file uploads (not in batch)
+            if (!batchInfo) {
+              toast.success(
+                <div>
+                  <div className="font-medium text-sm text-gray-900">✅ Upload Complete!</div>
+                  <div className="text-xs text-gray-600">{file.name}</div>
+                  <div className="text-xs text-green-600 mt-1">
+                    {totalChunks} chunks uploaded successfully with concurrent processing
+                  </div>
+                </div>,
+                { id: toastId, duration: 4000 }
+              );
+              
+              // Refresh immediately after upload
+              await loadFiles(currentPath);
+            }
+            return { success: true };
+          }
+          
+        } catch (batchError) {
+          console.error('Batch upload error:', batchError);
+          throw batchError;
         }
       }
       
       // If we get here, all chunks were uploaded successfully
       localStorage.removeItem(progressKey);
-      return true;
+      return { success: true };
       
     } catch (error) {
       console.error('Chunked upload error:', error);
@@ -403,46 +402,194 @@ function App() {
     }
   };
 
-  // Upload multiple files with batch notification
+  // Unified progress tracking for batch uploads
   const uploadMultipleFiles = async (files, path = '/', folderName = null) => {
     if (files.length === 0) return;
+
+    const LARGE_FILE_THRESHOLD = 50 * 1024 * 1024; // 50MB
+    const SMALL_FILE_CONCURRENCY = 4; // Upload 4 small files simultaneously
+    
+    // Separate small and large files
+    const smallFiles = [];
+    const largeFiles = [];
+    
+    files.forEach(file => {
+      if (file.size < LARGE_FILE_THRESHOLD) {
+        smallFiles.push(file);
+      } else {
+        largeFiles.push(file);
+      }
+    });
 
     const toastId = `batch-upload-${Date.now()}`;
     let successCount = 0;
     let failedFiles = [];
+    let totalProcessed = 0;
 
     try {
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const batchInfo = {
-          toastId,
-          currentIndex: i,
-          totalFiles: files.length,
-          folderName
-        };
-
-        const result = await uploadFile(file, path, batchInfo);
+      // Phase 1: Upload small files concurrently in batches
+      if (smallFiles.length > 0) {
+        console.log(`Uploading ${smallFiles.length} small files concurrently...`);
         
-        if (result.success) {
-          successCount++;
-        } else {
-          failedFiles.push({ name: file.name, error: result.error });
+        for (let i = 0; i < smallFiles.length; i += SMALL_FILE_CONCURRENCY) {
+          const batch = smallFiles.slice(i, i + SMALL_FILE_CONCURRENCY);
+          
+          // Update unified progress for small files
+          const overallProgress = Math.round((totalProcessed / files.length) * 100);
+          toast.loading(
+            <div className="flex items-center space-x-3">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+              <div className="flex-1">
+                <div className="font-medium text-sm text-gray-900">
+                  🚀 Uploading {folderName || `${files.length} Files`}
+                </div>
+                <div className="text-xs text-gray-600 mb-1">
+                  Processing {batch.length} files simultaneously ({totalProcessed + 1}-{Math.min(totalProcessed + batch.length, files.length)} of {files.length})
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-1.5">
+                  <div 
+                    className="bg-blue-600 h-1.5 rounded-full transition-all duration-300" 
+                    style={{ width: `${overallProgress}%` }}
+                  ></div>
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  {overallProgress}% complete • Small files: {smallFiles.length} • Large files: {largeFiles.length}
+                </div>
+              </div>
+            </div>,
+            { 
+              id: toastId,
+              duration: Infinity
+            }
+          );
+
+          // Upload batch concurrently (no individual toasts)
+          const batchPromises = batch.map(async (file) => {
+            const batchInfo = {
+              toastId, // Share the same toast ID
+              isBatch: true,
+              totalFiles: files.length,
+              folderName
+            };
+
+            return await uploadFile(file, path, batchInfo);
+          });
+
+          const results = await Promise.allSettled(batchPromises);
+          
+          // Process results and update counters
+          results.forEach((result, index) => {
+            totalProcessed++;
+            if (result.status === 'fulfilled' && result.value.success) {
+              successCount++;
+            } else {
+              const file = batch[index];
+              const error = result.status === 'rejected' ? result.reason.message : result.value.error;
+              failedFiles.push({ name: file.name, error });
+            }
+            
+            // Update progress after each file completes
+            const currentProgress = Math.round((totalProcessed / files.length) * 100);
+            toast.loading(
+              <div className="flex items-center space-x-3">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                <div className="flex-1">
+                  <div className="font-medium text-sm text-gray-900">
+                    🚀 Uploading {folderName || `${files.length} Files`}
+                  </div>
+                  <div className="text-xs text-gray-600 mb-1">
+                    Completed {totalProcessed} of {files.length} files
+                  </div>
+                  <div className="w-full bg-gray-200 rounded-full h-1.5">
+                    <div 
+                      className="bg-blue-600 h-1.5 rounded-full transition-all duration-300" 
+                      style={{ width: `${currentProgress}%` }}
+                    ></div>
+                  </div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    {currentProgress}% complete • ✅ {successCount} • ❌ {failedFiles.length}
+                  </div>
+                </div>
+              </div>,
+              { 
+                id: toastId,
+                duration: Infinity
+              }
+            );
+          });
+        }
+      }
+
+      // Phase 2: Upload large files sequentially with concurrent chunks
+      if (largeFiles.length > 0) {
+        console.log(`Uploading ${largeFiles.length} large files sequentially with concurrent chunks...`);
+        
+        for (let i = 0; i < largeFiles.length; i++) {
+          const file = largeFiles[i];
+          const currentProgress = Math.round((totalProcessed / files.length) * 100);
+          
+          // Update unified progress for large file
+          toast.loading(
+            <div className="flex items-center space-x-3">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+              <div className="flex-1">
+                <div className="font-medium text-sm text-gray-900">
+                  📦 Uploading {folderName || `${files.length} Files`}
+                </div>
+                <div className="text-xs text-gray-600 mb-1">
+                  Large file: {file.name} ({i + 1} of {largeFiles.length})
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-1.5">
+                  <div 
+                    className="bg-blue-600 h-1.5 rounded-full transition-all duration-300" 
+                    style={{ width: `${currentProgress}%` }}
+                  ></div>
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  {currentProgress}% complete • Concurrent chunk processing • ✅ {successCount} • ❌ {failedFiles.length}
+                </div>
+              </div>
+            </div>,
+            { 
+              id: toastId,
+              duration: Infinity
+            }
+          );
+
+          const batchInfo = {
+            toastId,
+            isBatch: true,
+            isLargeFile: true,
+            totalFiles: files.length,
+            folderName
+          };
+
+          const result = await uploadFile(file, path, batchInfo);
+          totalProcessed++;
+          
+          if (result && result.success) {
+            successCount++;
+          } else {
+            failedFiles.push({ name: file.name, error: result ? result.error : 'Unknown error' });
+          }
         }
       }
 
       // Refresh files after batch upload
       await loadFiles(currentPath);
 
-      // Show final batch result
+      // Show final unified result
       if (failedFiles.length === 0) {
         toast.success(
           <div>
             <div className="font-medium text-sm text-gray-900">
-              ✅ {folderName ? 'Folder' : 'Files'} Uploaded Successfully!
+              ✅ {folderName ? `Folder "${folderName}"` : 'Files'} Uploaded Successfully!
             </div>
             <div className="text-xs text-gray-600">
-              {successCount} file{successCount !== 1 ? 's' : ''} uploaded
-              {folderName && ` from ${folderName}`}
+              {successCount} file{successCount !== 1 ? 's' : ''} uploaded in total
+            </div>
+            <div className="text-xs text-green-600 mt-1">
+              🚀 {smallFiles.length} small files • 📦 {largeFiles.length} large files
             </div>
           </div>,
           { id: toastId, duration: 4000 }
@@ -452,18 +599,24 @@ function App() {
           <div>
             <div className="font-medium text-sm text-gray-900">⚠️ Upload Completed with Errors</div>
             <div className="text-xs text-gray-600">
-              {successCount} succeeded, {failedFiles.length} failed
+              ✅ {successCount} succeeded • ❌ {failedFiles.length} failed
+            </div>
+            <div className="text-xs text-orange-600 mt-1">
+              Check console for detailed error information
             </div>
           </div>,
           { id: toastId, duration: 6000 }
         );
+        
+        // Log failed files for debugging
+        console.error('Failed files:', failedFiles);
       }
 
     } catch (error) {
       console.error('Batch upload error:', error);
       toast.error(
         <div>
-          <div className="font-medium text-sm text-gray-900">❌ Batch Upload Failed</div>
+          <div className="font-medium text-sm text-gray-900">❌ Upload Failed</div>
           <div className="text-xs text-red-600 mt-1">{error.message}</div>
         </div>,
         { id: toastId, duration: 6000 }
@@ -499,6 +652,105 @@ function App() {
       if (!error.message.includes('already exists')) {
         toast.error(`Failed to create folder "${name}": ${error.message}`);
       }
+    }
+  };
+
+  // Concurrent delete operations for improved performance
+  const deleteMultipleItems = async (items) => {
+    if (items.length === 0) return;
+
+    const toastId = `delete-batch-${Date.now()}`;
+    const MAX_CONCURRENT_DELETES = 5; // Limit concurrent deletes to avoid overwhelming server
+    
+    try {
+      toast.loading(
+        <div className="flex items-center space-x-3">
+          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-red-600"></div>
+          <div className="flex-1">
+            <div className="font-medium text-sm text-gray-900">Deleting Items</div>
+            <div className="text-xs text-gray-600 mb-1">
+              Processing {items.length} item{items.length > 1 ? 's' : ''} concurrently...
+            </div>
+            <div className="w-full bg-gray-200 rounded-full h-1.5">
+              <div className="bg-red-600 h-1.5 rounded-full animate-pulse" style={{ width: '50%' }}></div>
+            </div>
+            <div className="text-xs text-gray-500 mt-1">🚀 Concurrent processing</div>
+          </div>
+        </div>,
+        { 
+          id: toastId,
+          duration: Infinity
+        }
+      );
+
+      // Process items in batches to limit concurrency
+      const results = [];
+      for (let i = 0; i < items.length; i += MAX_CONCURRENT_DELETES) {
+        const batch = items.slice(i, i + MAX_CONCURRENT_DELETES);
+        
+        const batchPromises = batch.map(async (item) => {
+          try {
+            const endpoint = item.isFolder ? 'folder' : 'file';
+            const response = await fetch(`${API_BASE_URL}/${endpoint}`, {
+              method: 'DELETE',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ path: item.path }),
+            });
+
+            if (!response.ok) {
+              throw new Error(`Failed to delete ${item.name}`);
+            }
+            
+            return { success: true, name: item.name };
+          } catch (error) {
+            console.error(`Delete error for ${item.name}:`, error);
+            return { success: false, name: item.name, error: error.message };
+          }
+        });
+
+        const batchResults = await Promise.allSettled(batchPromises);
+        results.push(...batchResults);
+      }
+
+      // Process results
+      const successful = results.filter(r => r.status === 'fulfilled' && r.value.success);
+      const failed = results.filter(r => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.success));
+
+      // Refresh files after deletion
+      await loadFiles(currentPath);
+
+      // Show results
+      if (failed.length === 0) {
+        toast.success(
+          <div>
+            <div className="font-medium text-sm text-gray-900">✅ Items Deleted Successfully!</div>
+            <div className="text-xs text-gray-600">
+              {successful.length} item{successful.length > 1 ? 's' : ''} deleted concurrently
+            </div>
+          </div>,
+          { id: toastId, duration: 4000 }
+        );
+      } else {
+        toast.error(
+          <div>
+            <div className="font-medium text-sm text-gray-900">⚠️ Deletion Completed with Errors</div>
+            <div className="text-xs text-gray-600">
+              {successful.length} succeeded, {failed.length} failed
+            </div>
+          </div>,
+          { id: toastId, duration: 6000 }
+        );
+      }
+
+    } catch (error) {
+      console.error('Batch delete error:', error);
+      toast.error(
+        <div>
+          <div className="font-medium text-sm text-gray-900">❌ Batch Delete Failed</div>
+          <div className="text-xs text-red-600 mt-1">{error.message}</div>
+        </div>,
+        { id: toastId, duration: 6000 }
+      );
     }
   };
 
@@ -848,6 +1100,7 @@ function App() {
           onCreateFolder={createFolder}
           onDeleteFile={deleteFile}
           onDeleteFolder={deleteFolder}
+          onDeleteMultipleItems={deleteMultipleItems}
           onRenameItem={renameItem}
           onNavigateToFolder={navigateToFolder}
           onNavigateUp={navigateUp}

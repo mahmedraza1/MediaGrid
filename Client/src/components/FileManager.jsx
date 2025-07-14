@@ -11,6 +11,7 @@ const FileManager = ({
   onCreateFolder,
   onDeleteFile,
   onDeleteFolder,
+  onDeleteMultipleItems,
   onRenameItem,
   onNavigateToFolder,
   onNavigateUp,
@@ -33,8 +34,9 @@ const FileManager = ({
 
   // Copy absolute link to clipboard
   const copyAbsoluteLink = async (itemPath, isFolder = false) => {
+    let absoluteUrl = '';
+    
     try {
-      let absoluteUrl;
       if (isFolder) {
         // For folders, create a link to the MediaGrid app with the folder path
         const encodedPath = encodeURIComponent(itemPath);
@@ -220,38 +222,55 @@ const FileManager = ({
     }
   };
 
-  // Handle bulk delete
+  // Handle bulk delete with concurrent processing
   const handleBulkDelete = async () => {
     if (selectedItems.size === 0) return;
 
     const confirmMessage = `Are you sure you want to delete ${selectedItems.size} selected item${selectedItems.size > 1 ? 's' : ''}?`;
     if (!window.confirm(confirmMessage)) return;
 
-    const selectedPaths = Array.from(selectedItems);
-    let successCount = 0;
-    let errorCount = 0;
+    // Prepare items for concurrent deletion
+    const itemsToDelete = Array.from(selectedItems).map(itemPath => {
+      const isFolder = folders.some(f => f.path === itemPath);
+      const item = isFolder 
+        ? folders.find(f => f.path === itemPath)
+        : files.find(f => f.path === itemPath);
+      
+      return {
+        path: itemPath,
+        name: item ? item.name : itemPath.split('/').pop(),
+        isFolder
+      };
+    });
 
-    for (const itemPath of selectedPaths) {
-      try {
-        // Check if it's a folder or file
-        const isFolder = folders.some(f => f.path === itemPath);
-        if (isFolder) {
-          await onDeleteFolder(itemPath);
-        } else {
-          await onDeleteFile(itemPath);
-        }
-        successCount++;
-      } catch (error) {
-        console.error(`Failed to delete ${itemPath}:`, error);
-        errorCount++;
-      }
-    }
-
-    // Show result notification
-    if (errorCount === 0) {
-      toast.success(`Successfully deleted ${successCount} item${successCount > 1 ? 's' : ''}`);
+    // Use the new concurrent delete function
+    if (onDeleteMultipleItems) {
+      await onDeleteMultipleItems(itemsToDelete);
     } else {
-      toast.error(`Deleted ${successCount} items, ${errorCount} failed`);
+      // Fallback to sequential deletion if concurrent function not available
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (const item of itemsToDelete) {
+        try {
+          if (item.isFolder) {
+            await onDeleteFolder(item.path);
+          } else {
+            await onDeleteFile(item.path);
+          }
+          successCount++;
+        } catch (error) {
+          console.error(`Failed to delete ${item.path}:`, error);
+          errorCount++;
+        }
+      }
+
+      // Show result notification
+      if (errorCount === 0) {
+        toast.success(`Successfully deleted ${successCount} item${successCount > 1 ? 's' : ''}`);
+      } else {
+        toast.error(`Deleted ${successCount} items, ${errorCount} failed`);
+      }
     }
 
     // Clear selection after deletion
