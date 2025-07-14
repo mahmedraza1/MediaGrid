@@ -54,7 +54,7 @@ const FileManager = ({
             return window.location.origin.replace(/:\d+/, ':5000') + '/videos';
           }
           
-          // In production, same origin
+          // In production (including VPS), same origin serves both app and files
           return window.location.origin + '/videos';
         };
         
@@ -73,7 +73,44 @@ const FileManager = ({
       });
     } catch (error) {
       console.error('Failed to copy link:', error);
-      toast.error('Failed to copy link to clipboard');
+      
+      // Fallback: Try to select text and copy manually
+      try {
+        // Create a temporary textarea element
+        const textArea = document.createElement('textarea');
+        textArea.value = absoluteUrl;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+        
+        if (successful) {
+          toast.success('Link copied to clipboard!', {
+            icon: '📋',
+            duration: 2000,
+          });
+        } else {
+          throw new Error('Fallback copy failed');
+        }
+      } catch (fallbackError) {
+        console.error('Fallback copy also failed:', fallbackError);
+        // Show the URL to user so they can copy manually
+        toast.error(
+          <div>
+            <div className="font-medium">Copy failed</div>
+            <div className="text-xs mt-1 p-2 bg-gray-100 rounded border max-w-xs overflow-x-auto">
+              {absoluteUrl}
+            </div>
+            <div className="text-xs text-gray-600 mt-1">Please copy the URL above manually</div>
+          </div>,
+          { duration: 8000 }
+        );
+      }
     }
   };
 

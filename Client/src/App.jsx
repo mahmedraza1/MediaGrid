@@ -26,9 +26,11 @@ function App() {
     const pathParam = urlParams.get('path');
     if (pathParam) {
       const decodedPath = decodeURIComponent(pathParam);
+      console.log('URL path parameter found:', decodedPath); // Debug log
       setCurrentPath(decodedPath);
       loadFiles(decodedPath);
     } else {
+      console.log('No URL path parameter, loading root'); // Debug log
       loadFiles('/');
     }
   }, []);
@@ -38,10 +40,13 @@ function App() {
     const url = new URL(window.location);
     if (path === '/') {
       url.searchParams.delete('path');
+      console.log('Updating URL to root (no path param)'); // Debug log
     } else {
       url.searchParams.set('path', encodeURIComponent(path));
+      console.log('Updating URL with path:', path); // Debug log
     }
     window.history.replaceState({}, '', url);
+    console.log('Final URL:', url.toString()); // Debug log
   };
 
   // Load files and folders
@@ -556,6 +561,7 @@ function App() {
 
   // Navigate to folder
   const navigateToFolder = (folderPath) => {
+    console.log('Navigating to folder:', folderPath); // Debug log
     setCurrentPath(folderPath);
     updateURL(folderPath);
     loadFiles(folderPath);
@@ -565,6 +571,7 @@ function App() {
   const navigateUp = () => {
     if (currentPath !== '/') {
       const parentPath = currentPath.split('/').slice(0, -1).join('/') || '/';
+      console.log('Navigating up from', currentPath, 'to', parentPath); // Debug log
       setCurrentPath(parentPath);
       updateURL(parentPath);
       loadFiles(parentPath);
@@ -580,26 +587,41 @@ function App() {
   // Load files on component mount
   useEffect(() => {
     loadFiles();
-    
-    // Set up automatic refresh for system stats every 30 seconds
-    const statsInterval = setInterval(() => {
-      loadFiles(); // This will refresh system stats along with files
-    }, 30000); // 30 seconds
-    
-    // Prevent default drag behaviors on the entire page (but allow drop events to propagate)
-    const preventDefaults = (e) => {
-      e.preventDefault();
+  }, []);
+
+  // Handle browser back/forward navigation
+  useEffect(() => {
+    const handlePopState = () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const pathParam = urlParams.get('path');
+      const newPath = pathParam ? decodeURIComponent(pathParam) : '/';
+      console.log('Browser navigation detected, loading path:', newPath); // Debug log
+      setCurrentPath(newPath);
+      loadFiles(newPath);
     };
-    
-    // Only prevent dragover and drop on document to avoid interference with our drop zone
-    document.addEventListener('dragover', preventDefaults, false);
-    document.addEventListener('drop', preventDefaults, false);
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, []);
+
+  // Set up automatic refresh for system stats (separate useEffect)
+  useEffect(() => {
+    const statsInterval = setInterval(() => {
+      // Only refresh stats without changing path or triggering file reload
+      refreshStats();
+    }, 30000); // 30 seconds
     
     return () => {
       clearInterval(statsInterval);
-      document.removeEventListener('dragover', preventDefaults, false);
-      document.removeEventListener('drop', preventDefaults, false);
     };
+  }, []); // Empty dependency array to prevent recreation
+
+  // Set up event listeners (separate useEffect)
+  useEffect(() => {
+    // Note: Drag and drop functionality has been removed as requested
+    // No event listeners needed for drag/drop prevention
   }, []);
 
   // Check for pending uploads on app load
@@ -719,7 +741,6 @@ function App() {
           <div className="flex justify-between items-center py-6">
             <div className="flex items-center space-x-8">
               <div>
-                <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">Learn</h1>
                 <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">MediaGrid</h1>
                 <p className="text-sm text-gray-600 mt-1 font-medium">Professional Video File Manager</p>
               </div>
